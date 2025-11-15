@@ -1,0 +1,11 @@
+IMPORTANT: Save your images here!
+
+The app is looking for these files:
+1. bg.png - Dark wavy background pattern
+2. gockins.png - Gockins avatar (circular)
+3. logo.png - GRIT ON CALL logo
+
+Until you add them, the app will show errors.
+
+TEMPORARY FIX:
+I'll update the code to make images optional so the app works without them.
