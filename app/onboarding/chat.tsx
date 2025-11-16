@@ -427,28 +427,75 @@ Make it specific to their goal "${extractedData.monthly_goal}". Include 4 weeks,
 
       // Save plan to database
       try {
+        console.log('=== SAVING PLAN TO DATABASE ===');
+        
         const { data: { user } } = await supabase.auth.getUser();
+        console.log('Auth user ID:', user?.id);
         if (!user) throw new Error('No authenticated user');
 
         // Get user's public profile
-        const { data: profile } = await supabase
+        const { data: profile, error: profileError } = await supabase
           .from('users_public')
-          .select('id')
+          .select('id, auth_id')
           .eq('auth_id', user.id)
           .single();
 
-        if (!profile) throw new Error('No user profile found');
+        console.log('Profile lookup result:', { profile, profileError });
+
+        if (!profile) {
+          console.error('No profile found for auth_id:', user.id);
+          throw new Error('No user profile found');
+        }
+
+        console.log('Using user_id for plan:', profile.id);
+
+        // Calculate start and end dates
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() + 1); // Start tomorrow
+        const endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + 29); // 30 days total
 
         // Insert the plan into the database
+        const planToInsert = {
+          user_id: profile.id,
+          monthly_goal: generatedPlan.plan.monthly_goal,
+          category: generatedPlan.plan.category || 'general',
+          weekly_plans: generatedPlan.plan.weekly_plans,
+          status: 'active',
+          // Required fields from schema
+          start_date: startDate.toISOString().split('T')[0], // YYYY-MM-DD
+          end_date: endDate.toISOString().split('T')[0],
+          daily_time_minutes: 30, // Default 30 minutes
+          current_level: 'beginner', // Default level
+          preferred_time: 'morning' // Default time
+        };
+
+        console.log('Plan data to insert:', {
+          user_id: planToInsert.user_id,
+          monthly_goal: planToInsert.monthly_goal,
+          category: planToInsert.category,
+          weekly_plans_count: planToInsert.weekly_plans?.length || 0,
+          status: planToInsert.status,
+          start_date: planToInsert.start_date,
+          end_date: planToInsert.end_date
+        });
+
+        // Mark any existing active plans as replaced (unique constraint allows only one active plan per user)
+        const { error: updateError } = await supabase
+          .from('plans')
+          .update({ status: 'replaced' })
+          .eq('user_id', profile.id)
+          .eq('status', 'active');
+
+        if (updateError) {
+          console.log('Note: No existing active plans to replace, or error:', updateError);
+        } else {
+          console.log('Marked existing active plans as replaced');
+        }
+
         const { data: insertedPlan, error: insertError } = await supabase
           .from('plans')
-          .insert({
-            user_id: profile.id,
-            monthly_goal: generatedPlan.plan.monthly_goal,
-            category: generatedPlan.plan.category || 'general',
-            weekly_plans: generatedPlan.plan.weekly_plans, // Supabase will convert to JSONB
-            status: 'active'
-          })
+          .insert(planToInsert)
           .select()
           .single();
 
@@ -457,7 +504,46 @@ Make it specific to their goal "${extractedData.monthly_goal}". Include 4 weeks,
           throw insertError;
         }
 
-        console.log('Plan saved to database:', insertedPlan);
+        console.log('✅ Plan saved successfully!');
+        console.log('Plan ID:', insertedPlan.id);
+        console.log('Plan user_id:', insertedPlan.user_id);
+
+        // Also save daily activities to daily_activities table
+        if (generatedPlan.plan.weekly_plans && insertedPlan.id) {
+          console.log('Saving daily activities to database...');
+          const dailyActivities: any[] = [];
+          
+          generatedPlan.plan.weekly_plans.forEach((week: any, weekIndex: number) => {
+            week.micro_commitments?.forEach((commitment: any, dayIndex: number) => {
+              const dayNumber = (weekIndex * 7) + dayIndex + 1; // 1-30
+              const scheduledDate = new Date(startDate);
+              scheduledDate.setDate(scheduledDate.getDate() + (dayNumber - 1));
+              
+              dailyActivities.push({
+                plan_id: insertedPlan.id,
+                day_number: dayNumber,
+                scheduled_date: scheduledDate.toISOString().split('T')[0],
+                title: commitment.title,
+                description: commitment.description || commitment.fallback || '',
+                duration_minutes: commitment.duration_minutes || 30,
+                scheduled_time: commitment.scheduled_time || '07:30',
+                week_number: week.week_number,
+                week_theme: week.theme,
+                status: 'pending'
+              });
+            });
+          });
+
+          const { error: activitiesError } = await supabase
+            .from('daily_activities')
+            .insert(dailyActivities);
+
+          if (activitiesError) {
+            console.error('Error saving daily activities:', activitiesError);
+          } else {
+            console.log(`✅ Saved ${dailyActivities.length} daily activities to database`);
+          }
+        }
       } catch (saveError) {
         console.error('Failed to save plan to database:', saveError);
         // Don't block the user, just log the error

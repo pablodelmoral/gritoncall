@@ -3,7 +3,6 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { savePlanToDatabase } from '@/lib/planDatabase';
 import AppHeader from '@/components/AppHeader';
 
 export default function SchedulePlan() {
@@ -39,20 +38,55 @@ export default function SchedulePlan() {
 
       if (!userPublic) throw new Error('User not found');
 
-      // Get plan from localStorage
-      const planStr = localStorage.getItem('generatedPlan');
-      if (!planStr) throw new Error('No plan found');
+      // Get the most recent active plan from database
+      const { data: existingPlan, error: planError } = await supabase
+        .from('plans')
+        .select('*')
+        .eq('user_id', userPublic.id)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
 
-      const planData = JSON.parse(planStr);
-      console.log('📦 Raw plan data from localStorage:', planData);
-      console.log('📦 Plan structure:', planData.plan);
+      if (planError || !existingPlan) {
+        throw new Error('No active plan found. Please complete onboarding first.');
+      }
 
-      // Save to database
-      await savePlanToDatabase({
-        userId: userPublic.id,
-        planData: planData.plan || planData, // Handle both structures
-        startDate: selectedDate,
-      });
+      console.log('📦 Plan loaded from database:', existingPlan);
+
+      // Update the plan's start date
+      const { error: updateError } = await supabase
+        .from('plans')
+        .update({ 
+          start_date: selectedDate.toISOString().split('T')[0],
+          end_date: new Date(selectedDate.getTime() + 29 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        })
+        .eq('id', existingPlan.id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      // Update all daily activities with new scheduled dates
+      const { data: activities } = await supabase
+        .from('daily_activities')
+        .select('id, day_number')
+        .eq('plan_id', existingPlan.id);
+
+      if (activities && activities.length > 0) {
+        for (const activity of activities) {
+          const activityDate = new Date(selectedDate);
+          activityDate.setDate(activityDate.getDate() + (activity.day_number - 1));
+          
+          await supabase
+            .from('daily_activities')
+            .update({ scheduled_date: activityDate.toISOString().split('T')[0] })
+            .eq('id', activity.id);
+        }
+        console.log(`Updated ${activities.length} activity dates`);
+      }
+
+      console.log('✅ Plan scheduled successfully!');
 
       Alert.alert(
         'Plan Scheduled!',
