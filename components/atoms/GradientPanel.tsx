@@ -1,29 +1,23 @@
 import React from 'react';
 import { View, StyleSheet, ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import Typography from '../atoms/Typography';
 
-interface CardProps {
-  title?: string;
+interface GradientCardProps {
   children: React.ReactNode;
   style?: ViewStyle;
+  padding?: number;
 }
 
-export default function Card({ title, children, style }: CardProps) {
+export default function GradientCard({ children, style, padding = 16 }: GradientCardProps) {
   return (
-    <View style={[styles.card, style]}>
+    <View style={[styles.container, style]}>
       <LinearGradient
         colors={['rgba(45, 60, 80, 0.6)', 'rgba(20, 25, 35, 0.6)']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={styles.gradient}
       />
-      <View style={styles.content}>
-        {title && (
-          <Typography variant="label" style={styles.title}>
-            {title}
-          </Typography>
-        )}
+      <View style={[styles.content, { padding }]}>
         {children}
       </View>
     </View>
@@ -31,11 +25,10 @@ export default function Card({ title, children, style }: CardProps) {
 }
 
 const styles = StyleSheet.create({
-  card: {
+  container: {
     position: 'relative',
-    borderRadius: 12,
     overflow: 'hidden',
-    marginBottom: 16,
+    borderRadius: 12,
   },
   gradient: {
     position: 'absolute',
@@ -45,11 +38,7 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   content: {
-    padding: 16,
     position: 'relative',
     zIndex: 1,
-  },
-  title: {
-    marginBottom: 12,
   },
 });

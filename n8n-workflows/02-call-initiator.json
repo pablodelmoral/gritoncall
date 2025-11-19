@@ -1,0 +1,275 @@
+{
+  "name": "Grit - Call Initiator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "initiator-trigger",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT sc.*, cp.system_prompt, cp.vapi_voice_id, cp.vapi_first_message, cp.vapi_end_message, cp.max_call_duration_seconds, cp.display_name as coach_display_name, da.title as activity_title, da.description as activity_description FROM scheduled_calls sc LEFT JOIN coach_profiles cp ON cp.slug = sc.coach_slug LEFT JOIN daily_activities da ON da.id = sc.daily_activity_id WHERE sc.status = 'pending' AND sc.scheduled_for <= NOW() AND sc.attempt_number <= sc.max_attempts ORDER BY sc.scheduled_for ASC LIMIT 10",
+        "options": {}
+      },
+      "id": "get-pending-calls",
+      "name": "Get Pending Calls",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [450, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-credentials",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-calls",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": "0",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-pending",
+      "name": "Has Pending Calls?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Vapi assistant configuration for each call\nconst calls = $input.all();\nconst assistantConfigs = [];\n\nfor (const call of calls) {\n  const data = call.json;\n  \n  // Build system prompt with context\n  const contextualPrompt = `${data.system_prompt}\n\n## Today's Context\nUser committed to: \"${data.activity_title}\"\nDescription: ${data.activity_description || 'No additional details'}\n\n## Your Task\n1. Check in on their progress with today's activity\n2. Provide accountability in your coaching style\n3. Get their commitment for tomorrow\n4. Rate their confidence level (1-10)\n5. End the call naturally\n\nKeep the call under ${Math.floor(data.max_call_duration_seconds / 60)} minutes.`;\n  \n  assistantConfigs.push({\n    json: {\n      scheduled_call_id: data.id,\n      phone_number: data.phone_number,\n      coach_slug: data.coach_slug,\n      coach_name: data.coach_display_name,\n      activity_title: data.activity_title,\n      vapi_config: {\n        name: `Grit Coach - ${data.coach_display_name}`,\n        model: {\n          provider: \"openai\",\n          model: \"gpt-4o-mini\",\n          temperature: 0.7,\n          messages: [\n            {\n              role: \"system\",\n              content: contextualPrompt\n            }\n          ],\n          functions: [\n            {\n              name: \"record_commitment\",\n              description: \"Record the user's commitment for tomorrow and their confidence level\",\n              parameters: {\n                type: \"object\",\n                properties: {\n                  commitment: {\n                    type: \"string\",\n                    description: \"What the user commits to doing tomorrow\"\n                  },\n                  confidence: {\n                    type: \"integer\",\n                    minimum: 1,\n                    maximum: 10,\n                    description: \"User's confidence level (1-10)\"\n                  },\n                  completed_today: {\n                    type: \"boolean\",\n                    description: \"Whether user completed today's activity\"\n                  }\n                },\n                required: [\"commitment\", \"confidence\", \"completed_today\"]\n              }\n            }\n          ]\n        },\n        voice: {\n          provider: \"11labs\",\n          voiceId: data.vapi_voice_id\n        },\n        firstMessage: data.vapi_first_message,\n        endCallMessage: data.vapi_end_message,\n        endCallPhrases: [\"goodbye\", \"talk later\", \"bye\", \"see you\"],\n        maxDurationSeconds: data.max_call_duration_seconds,\n        silenceTimeoutSeconds: 30,\n        responseDelaySeconds: 0.4,\n        llmRequestDelaySeconds: 0.1,\n        numWordsToInterruptAssistant: 2,\n        backgroundSound: \"off\"\n      }\n    }\n  });\n}\n\nreturn assistantConfigs;"
+      },
+      "id": "build-assistant-config",
+      "name": "Build Assistant Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.vapi.ai/assistant",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "vapiApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "={{ $json.vapi_config }}",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-vapi-assistant",
+      "name": "Create Vapi Assistant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1050, 200],
+      "credentials": {
+        "vapiApi": {
+          "id": "vapi-credentials",
+          "name": "Vapi API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.vapi.ai/call/phone",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "vapiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"assistantId\": \"{{ $json.id }}\",\n  \"phoneNumberId\": \"{{ $env.VAPI_PHONE_NUMBER_ID }}\",\n  \"customer\": {\n    \"number\": \"{{ $('Build Assistant Config').item.json.phone_number }}\"\n  },\n  \"metadata\": {\n    \"scheduled_call_id\": \"{{ $('Build Assistant Config').item.json.scheduled_call_id }}\",\n    \"coach_slug\": \"{{ $('Build Assistant Config').item.json.coach_slug }}\",\n    \"activity_title\": \"{{ $('Build Assistant Config').item.json.activity_title }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "initiate-call",
+      "name": "Initiate Vapi Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1250, 200],
+      "credentials": {
+        "vapiApi": {
+          "id": "vapi-credentials",
+          "name": "Vapi API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE scheduled_calls SET status = 'calling', vapi_call_id = '{{ $json.id }}', vapi_assistant_id = '{{ $('Create Vapi Assistant').item.json.id }}', call_started_at = NOW(), updated_at = NOW() WHERE id = '{{ $('Build Assistant Config').item.json.scheduled_call_id }}'",
+        "options": {}
+      },
+      "id": "update-call-status",
+      "name": "Update Call Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1450, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-credentials",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "call_logs",
+        "columns": "scheduled_call_id,user_id,vapi_call_id,phone_number,coach_slug,status,started_at",
+        "additionalFields": {
+          "scheduled_call_id": "={{ $('Build Assistant Config').item.json.scheduled_call_id }}",
+          "vapi_call_id": "={{ $json.id }}",
+          "phone_number": "={{ $('Build Assistant Config').item.json.phone_number }}",
+          "coach_slug": "={{ $('Build Assistant Config').item.json.coach_slug }}",
+          "status": "calling",
+          "started_at": "={{ $now.toISO() }}"
+        },
+        "options": {}
+      },
+      "id": "log-call",
+      "name": "Log Call",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1650, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-credentials",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Call Initiator\n\nRuns every 5 minutes to:\n1. Get pending calls that are due\n2. Create Vapi assistant with coach personality\n3. Initiate outbound call\n4. Update database with call status\n\nVapi will send webhooks as call progresses.",
+        "height": 400,
+        "width": 300
+      },
+      "id": "note-2",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 460]
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Get Pending Calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pending Calls": {
+      "main": [
+        [
+          {
+            "node": "Has Pending Calls?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Pending Calls?": {
+      "main": [
+        [
+          {
+            "node": "Build Assistant Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Assistant Config": {
+      "main": [
+        [
+          {
+            "node": "Create Vapi Assistant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Vapi Assistant": {
+      "main": [
+        [
+          {
+            "node": "Initiate Vapi Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initiate Vapi Call": {
+      "main": [
+        [
+          {
+            "node": "Update Call Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Call Status": {
+      "main": [
+        [
+          {
+            "node": "Log Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-11-17T00:00:00.000Z",
+  "versionId": "1"
+}

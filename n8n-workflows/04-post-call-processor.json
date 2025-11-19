@@ -1,0 +1,282 @@
+{
+  "name": "Grit - Post-Call Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "processor-trigger",
+      "name": "Every 10 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT sc.*, u.id as user_id, u.auth_id, da.id as activity_id FROM scheduled_calls sc JOIN users_public u ON u.id = sc.user_id LEFT JOIN daily_activities da ON da.id = sc.daily_activity_id WHERE sc.status = 'completed' AND sc.user_completed_today IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM calls c WHERE c.user_id = u.id AND c.created_at::date = sc.call_ended_at::date ) LIMIT 20",
+        "options": {}
+      },
+      "id": "get-completed-calls",
+      "name": "Get Unprocessed Calls",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [450, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-credentials",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-calls",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": "0",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-calls",
+      "name": "Has Calls?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE daily_activities SET status = CASE WHEN {{ $json.user_completed_today }} THEN 'completed' ELSE 'pending' END, completed_at = CASE WHEN {{ $json.user_completed_today }} THEN NOW() ELSE NULL END, updated_at = NOW() WHERE id = '{{ $json.activity_id }}'",
+        "options": {}
+      },
+      "id": "update-activity",
+      "name": "Update Daily Activity",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [850, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-credentials",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "completed",
+              "leftValue": "={{ $('Get Unprocessed Calls').item.json.user_completed_today }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-completed",
+      "name": "Activity Completed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE users_public SET streak = streak + 1, best_streak = GREATEST(best_streak, streak + 1), updated_at = NOW() WHERE id = '{{ $('Get Unprocessed Calls').item.json.user_id }}'",
+        "options": {}
+      },
+      "id": "increment-streak",
+      "name": "Increment User Streak",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1250, 100],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-credentials",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE users_public SET streak = 0, updated_at = NOW() WHERE id = '{{ $('Get Unprocessed Calls').item.json.user_id }}'",
+        "options": {}
+      },
+      "id": "reset-streak",
+      "name": "Reset User Streak",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1250, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-credentials",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "calls",
+        "columns": "user_id,status,summary_json",
+        "additionalFields": {
+          "user_id": "={{ $('Get Unprocessed Calls').item.json.user_id }}",
+          "status": "completed",
+          "summary_json": "={{ JSON.stringify({ commitment: $('Get Unprocessed Calls').item.json.user_commitment, confidence: $('Get Unprocessed Calls').item.json.user_confidence, completed: $('Get Unprocessed Calls').item.json.user_completed_today, call_id: $('Get Unprocessed Calls').item.json.id }) }}"
+        },
+        "options": {}
+      },
+      "id": "create-call-record",
+      "name": "Create Call Record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1450, 200],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-credentials",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Post-Call Processor\n\nRuns every 10 minutes to:\n1. Find completed calls not yet processed\n2. Update daily activity status\n3. Update user streaks\n4. Create call records\n\nThis ensures database consistency after calls complete.",
+        "height": 400,
+        "width": 300
+      },
+      "id": "note-4",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 460]
+    }
+  ],
+  "connections": {
+    "Every 10 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Get Unprocessed Calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Unprocessed Calls": {
+      "main": [
+        [
+          {
+            "node": "Has Calls?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Calls?": {
+      "main": [
+        [
+          {
+            "node": "Update Daily Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Daily Activity": {
+      "main": [
+        [
+          {
+            "node": "Activity Completed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Activity Completed?": {
+      "main": [
+        [
+          {
+            "node": "Increment User Streak",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reset User Streak",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Increment User Streak": {
+      "main": [
+        [
+          {
+            "node": "Create Call Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reset User Streak": {
+      "main": [
+        [
+          {
+            "node": "Create Call Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-11-17T00:00:00.000Z",
+  "versionId": "1"
+}

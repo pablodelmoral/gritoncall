@@ -38,37 +38,38 @@ export default function Typography({
 
 const styles = StyleSheet.create({
   base: {
-    color: Colors.white,
+    color: '#CCCCCC',
   },
   h1: {
-    fontSize: 32,
-    fontWeight: '900',
+    fontSize: 28,
+    fontFamily: 'Akira-Extended',
     letterSpacing: 2,
-    color: Colors.white,
+    color: '#EEEEEE',
   },
   h2: {
-    fontSize: 24,
-    fontWeight: '800',
+    fontSize: 20,
+    fontFamily: 'Akira-Extended',
     letterSpacing: 1,
-    color: Colors.white,
+    color: '#EEEEEE',
   },
   h3: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.white,
+    fontSize: 16,
+    fontFamily: 'Akira-Extended',
+    color: '#EEEEEE',
   },
   body: {
-    fontSize: 16,
-    lineHeight: 24,
-    color: Colors.lightGray,
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#CCCCCC',
   },
   caption: {
     fontSize: 12,
-    color: Colors.lightGray,
+    color: '#888888',
   },
   label: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 12,
+    fontFamily: 'Akira-Extended',
+    letterSpacing: 0.5,
     color: Colors.red,
   },
 });

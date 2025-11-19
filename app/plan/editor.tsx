@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Modal, Image, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '@/components/AppHeader';
+import Button from '@/components/atoms/Button';
+import Typography from '@/components/atoms/Typography';
+import Card from '@/components/molecules/Card';
+import GradientCard from '@/components/atoms/GradientPanel';
+import CustomScrollView from '@/components/atoms/CustomScrollView';
 import { supabase } from '@/lib/supabase';
 
 interface MicroCommitment {
@@ -27,6 +32,7 @@ interface Plan {
 }
 
 export default function PlanEditor() {
+  const { width, height } = useWindowDimensions();
   const router = useRouter();
   const [plan, setPlan] = useState<Plan | null>(null);
   const [selectedWeek, setSelectedWeek] = useState(1);
@@ -124,6 +130,24 @@ export default function PlanEditor() {
   if (!plan || !plan.weekly_plans || plan.weekly_plans.length === 0) {
     return (
       <View style={styles.wrapper}>
+        <Image
+          source={require('@/assets/images/bg.png')}
+          style={{
+            position: 'absolute',
+            width: '100%',
+            height: '100%',
+            top: 0,
+            left: 0,
+          }}
+          resizeMode="cover"
+        />
+        <View style={styles.headerBar}>
+          <Image 
+            source={require('@/assets/images/logo.png')}
+            style={styles.headerLogo}
+          />
+          <Text style={styles.headerTitle}>PLAN EDITOR</Text>
+        </View>
         <View style={styles.container}>
           <Text style={styles.loadingText}>
             {!plan ? 'Loading plan...' : 'No plan data available. Please complete onboarding first.'}
@@ -139,6 +163,24 @@ export default function PlanEditor() {
   if (!currentWeek) {
     return (
       <View style={styles.wrapper}>
+        <Image
+          source={require('@/assets/images/bg.png')}
+          style={{
+            position: 'absolute',
+            width: '100%',
+            height: '100%',
+            top: 0,
+            left: 0,
+          }}
+          resizeMode="cover"
+        />
+        <View style={styles.headerBar}>
+          <Image 
+            source={require('@/assets/images/logo.png')}
+            style={styles.headerLogo}
+          />
+          <Text style={styles.headerTitle}>PLAN EDITOR</Text>
+        </View>
         <View style={styles.container}>
           <Text style={styles.loadingText}>Week {selectedWeek} not available</Text>
         </View>
@@ -149,11 +191,25 @@ export default function PlanEditor() {
 
   return (
     <View style={styles.wrapper}>
-      <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-        <Text style={styles.headerTitle}>PLAN OVERVIEW</Text>
+      <Image
+        source={require('@/assets/images/bg.png')}
+        style={{
+          position: 'absolute',
+          width: '100%',
+          height: '100%',
+          top: 0,
+          left: 0,
+        }}
+        resizeMode="cover"
+      />
+      <View style={styles.headerBar}>
+        <Image 
+          source={require('@/assets/images/logo.png')}
+          style={styles.headerLogo}
+        />
+        <Text style={styles.headerTitle}>PLAN EDITOR</Text>
       </View>
+      <View style={styles.container}>
 
       {/* Week Tabs */}
       <View style={styles.weekTabs}>
@@ -184,10 +240,10 @@ export default function PlanEditor() {
       </View>
 
       {/* Days List */}
-      <ScrollView style={styles.daysList}>
+      <CustomScrollView style={styles.daysList}>
         {currentWeek.micro_commitments && currentWeek.micro_commitments.length > 0 ? (
           currentWeek.micro_commitments.map((commitment, index) => (
-          <View key={index} style={styles.dayCard}>
+          <GradientCard key={index} style={styles.dayCard}>
             <View style={styles.dayHeader}>
               <Text style={styles.dayTitle}>Day {commitment.day_of_week}</Text>
               <TouchableOpacity
@@ -207,17 +263,21 @@ export default function PlanEditor() {
                 {commitment.scheduled_time || '7:30am'}
               </Text>
             </View>
-          </View>
+          </GradientCard>
           ))
         ) : (
           <Text style={styles.loadingText}>No activities for this week</Text>
         )}
-      </ScrollView>
+      </CustomScrollView>
 
       {/* Approve Button */}
-      <TouchableOpacity style={styles.approveButton} onPress={handleApprovePlan}>
-        <Text style={styles.approveButtonText}>LOOKS GOOD - SCHEDULE START</Text>
-      </TouchableOpacity>
+      <View style={styles.buttonContainer}>
+        <Button 
+          title="LOOKS GOOD - SCHEDULE START" 
+          onPress={handleApprovePlan}
+          variant="primary"
+        />
+      </View>
 
       {/* Edit Modal */}
       <Modal
@@ -295,24 +355,33 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: 'transparent',
   },
-  header: {
-    paddingTop: 60,
-    paddingBottom: 20,
+  headerBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#000000',
     paddingHorizontal: 20,
-    backgroundColor: '#000',
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FF0000',
+  },
+  headerLogo: {
+    width: 100,
+    height: 32,
+    resizeMode: 'contain',
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFF',
-    textAlign: 'center',
-    letterSpacing: 2,
+    color: '#CCCCCC',
+    fontSize: 15,
+    fontFamily: 'Akira-Extended',
+    letterSpacing: 1.5,
   },
   weekTabs: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
+    paddingTop: 16,
     marginBottom: 20,
     gap: 10,
   },
@@ -327,12 +396,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF0000',
   },
   weekTabText: {
-    color: '#666',
-    fontSize: 14,
-    fontWeight: '600',
+    color: '#888888',
+    fontSize: 13,
+    fontFamily: 'Akira-Extended',
+    letterSpacing: 1,
   },
   weekTabTextActive: {
-    color: '#FFF',
+    color: '#EEEEEE',
   },
   weekTheme: {
     paddingHorizontal: 20,
@@ -346,13 +416,10 @@ const styles = StyleSheet.create({
   },
   daysList: {
     flex: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
   },
   dayCard: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   dayHeader: {
     flexDirection: 'row',
@@ -456,9 +523,13 @@ const styles = StyleSheet.create({
     height: 80,
     textAlignVertical: 'top',
   },
+  buttonContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
   saveButton: {
     backgroundColor: '#FF0000',
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
   },

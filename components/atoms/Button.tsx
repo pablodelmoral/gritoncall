@@ -52,7 +52,7 @@ const styles = StyleSheet.create({
   button: {
     paddingVertical: 16,
     paddingHorizontal: 24,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -60,11 +60,11 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.red,
   },
   secondaryButton: {
-    backgroundColor: Colors.darkBlue,
+    backgroundColor: '#233551',
   },
   outlineButton: {
     backgroundColor: 'transparent',
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: Colors.red,
   },
   disabledButton: {
@@ -74,20 +74,21 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
   buttonText: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 14,
+    fontFamily: 'Akira-Extended',
     letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   primaryText: {
-    color: Colors.white,
+    color: '#000000',
   },
   secondaryText: {
-    color: Colors.white,
+    color: '#000000',
   },
   outlineText: {
     color: Colors.red,
   },
   disabledText: {
-    color: Colors.lightGray,
+    color: '#666666',
   },
 });

@@ -1,14 +1,20 @@
 // iOS-style bottom tab bar navigation
-import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
-import { useRouter, usePathname } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/colors';
+import { Ionicons } from '@expo/vector-icons';
+import { usePathname, useRouter } from 'expo-router';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function AppHeader() {
   const router = useRouter();
   const pathname = usePathname();
 
-  const isActive = (paths: string[]) => paths.some(path => pathname.includes(path));
+  const isActive = (paths: string[]) => paths.some(path => pathname === path || pathname.startsWith(path + '/'));
+
+  // Check if we're on the home page (exact match or just /(tabs))
+  const isHomePage = pathname === '/' || pathname === '/(tabs)' || pathname === '/(tabs)/index';
+  
+  // Check if we're on the progress page
+  const isProgressPage = pathname === '/(tabs)/progress' || pathname.includes('/progress');
 
   return (
     <View style={styles.tabBar}>
@@ -18,11 +24,11 @@ export default function AppHeader() {
         style={styles.tabButton}
       >
         <Ionicons 
-          name={isActive(['/(tabs)']) ? 'home' : 'home-outline'} 
+          name={isHomePage ? 'home' : 'home-outline'} 
           size={24} 
-          color={isActive(['/(tabs)']) ? Colors.red : Colors.lightGray} 
+          color={isHomePage ? Colors.red : Colors.lightGray} 
         />
-        <Text style={[styles.tabText, isActive(['/(tabs)']) && styles.tabTextActive]}>
+        <Text style={[styles.tabText, isHomePage && styles.tabTextActive]}>
           Today
         </Text>
       </Pressable>
@@ -42,17 +48,17 @@ export default function AppHeader() {
         </Text>
       </Pressable>
 
-      {/* Progress Tab (placeholder for future) */}
+      {/* Progress Tab */}
       <Pressable 
-        onPress={() => {}}
+        onPress={() => router.push('/(tabs)/progress' as any)}
         style={styles.tabButton}
       >
         <Ionicons 
-          name="stats-chart-outline" 
+          name={isProgressPage ? 'stats-chart' : 'stats-chart-outline'} 
           size={24} 
-          color={Colors.lightGray} 
+          color={isProgressPage ? Colors.red : Colors.lightGray} 
         />
-        <Text style={styles.tabText}>
+        <Text style={[styles.tabText, isProgressPage && styles.tabTextActive]}>
           Progress
         </Text>
       </Pressable>
@@ -78,9 +84,9 @@ export default function AppHeader() {
 const styles = StyleSheet.create({
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: Colors.darkBlue,
+    backgroundColor: '#000000',
     borderTopWidth: 0.5,
-    borderTopColor: Colors.lightGray,
+    borderTopColor: '#333333',
     paddingBottom: Platform.OS === 'ios' ? 20 : 8,
     paddingTop: 8,
     paddingHorizontal: 8,

@@ -1,7 +1,11 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Image, ImageBackground, Dimensions, useWindowDimensions } from 'react-native';
-import { useRouter } from 'expo-router';
+import CustomScrollView from '@/components/atoms/CustomScrollView';
+import CoachCard, { CoachProfileCard } from '@/components/molecules/CoachCard';
 import { supabase } from '@/lib/supabase';
+import { Ionicons } from '@expo/vector-icons';
+import Slider from '@react-native-community/slider';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 
 type Message = {
   role: 'user' | 'assistant';
@@ -224,17 +228,65 @@ function generateCategoryPlan(category: string, monthlyGoal: string, dailyMinute
 export default function OnboardingChat() {
   const { width, height } = useWindowDimensions();
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: "Hi! I'm your Grit coach. Let's build your personalized 30-day plan. What outcome do you want to achieve in 30 days?" },
+    { role: 'assistant', content: "Welcome to Grit On Call.\n\nFor the next 30 days, you are training discipline — not motivation.\n\nIf you're ready, I'll turn you into someone who shows up no matter what.\n\nAre you in?" },
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [timeSliderValue, setTimeSliderValue] = useState(30);
+  const [showCommitmentButtons, setShowCommitmentButtons] = useState(true);
+  const [showTimeSlider, setShowTimeSlider] = useState(false);
+  const [showExperienceButtons, setShowExperienceButtons] = useState(false);
+  const [showTimeOfDayButtons, setShowTimeOfDayButtons] = useState(false);
+  const [coachProfiles, setCoachProfiles] = useState<CoachProfileCard[]>([]);
+  const [selectedCoachSlug, setSelectedCoachSlug] = useState<string | null>(null);
+  const [showCoachSelection, setShowCoachSelection] = useState(false);
+  const [savingCoach, setSavingCoach] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const router = useRouter();
 
   useEffect(() => {
     scrollRef.current?.scrollToEnd({ animated: true });
+    
+    // Check the last assistant message to determine which interactive element to show
+    const lastAssistantMessage = [...messages].reverse().find(m => m.role === 'assistant');
+    const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
+    
+    // Only show interactive if last message is from assistant and user hasn't responded yet
+    if (lastAssistantMessage && messages[messages.length - 1]?.role === 'assistant') {
+      const lowerMessage = lastAssistantMessage.content.toLowerCase();
+      
+      if (lowerMessage.includes('time') && (lowerMessage.includes('dedicate') || lowerMessage.includes('daily'))) {
+        console.log('🎯 Should show time slider');
+        setShowTimeSlider(true);
+        setShowExperienceButtons(false);
+        setShowTimeOfDayButtons(false);
+      } else if (lowerMessage.includes('experience') || (lowerMessage.includes('beginner') && lowerMessage.includes('intermediate') && lowerMessage.includes('advanced'))) {
+        console.log('🎯 Should show experience buttons');
+        setShowTimeSlider(false);
+        setShowExperienceButtons(true);
+        setShowTimeOfDayButtons(false);
+      } else if ((lowerMessage.includes('time of day') || lowerMessage.includes('what time')) && (lowerMessage.includes('morning') || lowerMessage.includes('afternoon') || lowerMessage.includes('evening'))) {
+        console.log('🎯 Should show time of day buttons');
+        setShowTimeSlider(false);
+        setShowExperienceButtons(false);
+        setShowTimeOfDayButtons(true);
+      } else {
+        setShowTimeSlider(false);
+        setShowExperienceButtons(false);
+        setShowTimeOfDayButtons(false);
+      }
+    } else {
+      // Hide if user has already responded
+      setShowTimeSlider(false);
+      setShowExperienceButtons(false);
+      setShowTimeOfDayButtons(false);
+    }
   }, [messages]);
+  
+  useEffect(() => {
+    console.log('Interactive states changed:', { showTimeSlider, showExperienceButtons, showTimeOfDayButtons });
+  }, [showTimeSlider, showExperienceButtons, showTimeOfDayButtons]);
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
@@ -242,6 +294,12 @@ export default function OnboardingChat() {
     const userMessage = input.trim();
     setInput('');
     setLoading(true);
+    
+    // Hide interactive elements when user manually types a response
+    setShowTimeSlider(false);
+    setShowExperienceButtons(false);
+    setShowTimeOfDayButtons(false);
+    
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
 
     try {
@@ -403,7 +461,8 @@ Make it specific to their goal "${extractedData.monthly_goal}". Include 4 weeks,
         body: JSON.stringify({
           model: 'gpt-4o-mini',
           messages: [{ role: 'user', content: planPrompt }],
-          temperature: 0.8,
+          response_format: { type: 'json_object' },
+          temperature: 0.7,
           max_tokens: 8000
         })
       });
@@ -415,13 +474,15 @@ Make it specific to their goal "${extractedData.monthly_goal}". Include 4 weeks,
       const planData = await planResponse.json();
       const planText = planData.choices[0].message.content;
       
-      // Extract JSON from response
-      const jsonMatch = planText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('No valid JSON in response');
+      // Parse JSON response (response_format ensures valid JSON)
+      let generatedPlan;
+      try {
+        generatedPlan = JSON.parse(planText);
+      } catch (parseError) {
+        console.error('JSON parse error:', parseError);
+        console.error('Raw response:', planText);
+        throw new Error('Failed to parse plan JSON from OpenAI');
       }
-
-      const generatedPlan = JSON.parse(jsonMatch[0]);
       
       console.log('Generated plan:', generatedPlan);
 
@@ -546,17 +607,19 @@ Make it specific to their goal "${extractedData.monthly_goal}". Include 4 weeks,
         }
       } catch (saveError) {
         console.error('Failed to save plan to database:', saveError);
-        // Don't block the user, just log the error
+        // Continue to coach selection even if save failed
       }
 
+      // Always show coach selection after plan generation attempt
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: '✅ Your AI-powered plan is ready! Let me show you...' },
+        { role: 'assistant', content: '✅ Your AI-powered plan is ready.' },
+        { role: 'assistant', content: "Now pick the coaching style that's going to push you." },
       ]);
 
-      setTimeout(() => {
-        router.replace('/plan/overview' as any);
-      }, 1500);
+      await loadCoachProfiles();
+      setShowCoachSelection(true);
+      setIsGeneratingPlan(false);
     } catch (error: any) {
       console.error('AI Plan generation error:', error);
       setMessages((prev) => [
@@ -567,174 +630,148 @@ Make it specific to their goal "${extractedData.monthly_goal}". Include 4 weeks,
     }
   };
 
-  // Alias for AI-powered generation
-  const generatePlan = generatePlanWithAI;
-
-  // Remove old streaming code, replace with simple response handling
-  const oldSendMessage = async () => {
-    // This is the old Edge Function approach - keeping as backup
-    if (!input.trim() || loading) return;
-    const userMessage = input.trim();
-    setInput('');
-    setLoading(true);
-    setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
-    
+  const loadCoachProfiles = async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const authToken = session?.access_token || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/onboarding_chat`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ message: userMessage, sessionId: sessionId }),
-          headers: {
-            'Authorization': `Bearer ${authToken}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-      
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No response stream');
+      const { data, error } = await supabase
+        .from('coach_profiles')
+        .select('slug, display_name, short_tagline, sample_voice_line, avatar_image_url')
+        .eq('is_active', true)
+        .order('display_name', { ascending: true });
 
-      const decoder = new TextDecoder();
-      let assistantMessage = '';
-      let newSessionId = sessionId;
-      let isComplete = false;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n').filter((line) => line.trim() !== '');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
-
-            try {
-              const parsed = JSON.parse(data);
-              
-              if (parsed.content) {
-                assistantMessage += parsed.content;
-                setMessages((prev) => {
-                  const newMessages = [...prev];
-                  if (newMessages[newMessages.length - 1]?.role === 'assistant') {
-                    newMessages[newMessages.length - 1].content = assistantMessage;
-                  } else {
-                    newMessages.push({ role: 'assistant', content: assistantMessage });
-                  }
-                  return newMessages;
-                });
-              }
-
-              if (parsed.sessionId) {
-                newSessionId = parsed.sessionId;
-                setSessionId(parsed.sessionId);
-                console.log('🔄 Updated sessionId to:', parsed.sessionId);
-              }
-
-              if (parsed.complete && parsed.data) {
-                console.log('🎯 Onboarding complete! Data:', parsed.data);
-                if (authToken) {
-                  generatePlan(authToken, parsed.data);
-                }
-              } else if (parsed.complete) {
-                // Handle case where complete is true but no structured data
-                console.log('🎯 Onboarding marked complete, extracting data from conversation');
-                
-                // Extract goal category from conversation messages
-                // Focus on user messages, especially the first one
-                const userMessages = messages.filter(m => m.role === 'user').map(m => m.content.toLowerCase());
-                const firstUserMessage = userMessages[0] || '';
-                const allUserText = userMessages.join(' ');
-                
-                let goalCategory = 'general';
-                let monthlyGoal = firstUserMessage || 'Achieve your 30-day goal';
-                
-                // Check for financial keywords
-                if (allUserText.includes('save') || allUserText.includes('money') || allUserText.includes('$') || 
-                    allUserText.includes('budget') || allUserText.includes('financial') || allUserText.includes('expense')) {
-                  goalCategory = 'financial';
-                  if (!monthlyGoal.includes('save') && !monthlyGoal.includes('money')) {
-                    monthlyGoal = 'Save money and improve financial habits';
-                  }
-                } 
-                // Check for fitness keywords
-                else if (allUserText.includes('gym') || allUserText.includes('exercise') || allUserText.includes('fitness') || 
-                         allUserText.includes('workout') || allUserText.includes('weight') || allUserText.includes('run')) {
-                  goalCategory = 'fitness';
-                  if (!monthlyGoal.includes('gym') && !monthlyGoal.includes('fitness')) {
-                    monthlyGoal = 'Start going to the gym consistently';
-                  }
-                } 
-                // Check for creative keywords
-                else if (allUserText.includes('write') || allUserText.includes('book') || allUserText.includes('story') || 
-                         allUserText.includes('creative') || allUserText.includes('art') || allUserText.includes('paint')) {
-                  goalCategory = 'creative';
-                  if (!monthlyGoal.includes('write') && !monthlyGoal.includes('creative')) {
-                    monthlyGoal = 'Complete a creative project';
-                  }
-                }
-                
-                // Extract time commitment from conversation
-                let dailyMinutes = 30;
-                const timeMatch = allUserText.match(/(\d+)\s*(hour|hr|minute|min)/i);
-                if (timeMatch) {
-                  const num = parseInt(timeMatch[1]);
-                  const unit = timeMatch[2].toLowerCase();
-                  dailyMinutes = unit.includes('hour') || unit.includes('hr') ? num * 60 : num;
-                }
-                
-                // Extract experience level
-                let experienceLevel = 'beginner';
-                if (allUserText.includes('intermediate') || allUserText.includes('some experience')) {
-                  experienceLevel = 'intermediate';
-                } else if (allUserText.includes('advanced') || allUserText.includes('experienced')) {
-                  experienceLevel = 'advanced';
-                }
-                
-                // Extract time preference
-                let timePreference = 'flexible';
-                if (allUserText.includes('morning') || allUserText.includes('am')) {
-                  timePreference = 'morning';
-                } else if (allUserText.includes('afternoon')) {
-                  timePreference = 'afternoon';
-                } else if (allUserText.includes('evening') || allUserText.includes('night') || allUserText.includes('pm')) {
-                  timePreference = 'evening';
-                }
-                
-                const conversationData = {
-                  monthly_goal: monthlyGoal,
-                  goal_category: goalCategory,
-                  daily_time_minutes: dailyMinutes,
-                  current_level: experienceLevel,
-                  constraints: [],
-                  preferred_time: timePreference,
-                  motivation: "Build consistent daily habits",
-                  user_context: {
-                    first_message: firstUserMessage,
-                    all_responses: userMessages
-                  }
-                };
-                
-                console.log('📊 Extracted conversation data:', conversationData);
-                
-                if (authToken) {
-                  generatePlan(authToken, conversationData);
-                }
-              }
-            } catch (e) {
-              // Skip invalid JSON
-            }
-          }
-        }
+      if (error) {
+        console.error('Error loading coach profiles:', error);
+        return;
       }
 
-      if (!isComplete && assistantMessage && messages[messages.length - 1]?.role !== 'assistant') {
-        setMessages((prev) => [...prev, { role: 'assistant', content: assistantMessage }]);
+      setCoachProfiles((data || []) as CoachProfileCard[]);
+    } catch (err) {
+      console.error('Unexpected error loading coach profiles:', err);
+    }
+  };
+
+  const handleCoachConfirm = async () => {
+    if (!selectedCoachSlug || savingCoach) return;
+
+    try {
+      setSavingCoach(true);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No authenticated user');
+
+      const { data: profile } = await supabase
+        .from('users_public')
+        .select('id, auth_id')
+        .eq('auth_id', user.id)
+        .single();
+
+      if (!profile) throw new Error('No user profile found');
+
+      const { error } = await supabase
+        .from('users_public')
+        .update({ selected_coach_slug: selectedCoachSlug })
+        .eq('id', profile.id);
+
+      if (error) {
+        console.error('Error saving selected coach:', error);
+        Alert.alert('Error', 'Could not save selected coach. Please try again.');
+        setSavingCoach(false);
+        return;
+      }
+
+      setShowCoachSelection(false);
+      router.replace('/plan/overview' as any);
+    } catch (err: any) {
+      console.error('Unexpected error saving coach selection:', err);
+      Alert.alert('Error', err.message || 'Something went wrong saving your coach.');
+      setSavingCoach(false);
+    }
+  };
+  
+  // Handler for commitment button selection
+  const handleCommitmentSelection = async (commitment: string) => {
+    setShowCommitmentButtons(false);
+    setMessages((prev) => [...prev, { role: 'user', content: commitment }]);
+    
+    // Add coach response asking for their goal
+    setTimeout(() => {
+      setMessages((prev) => [...prev, { 
+        role: 'assistant', 
+        content: "Good. Now tell me — what outcome do you want to achieve in the next 30 days?" 
+      }]);
+    }, 500);
+  };
+  
+  // Handler for time slider submission
+  const handleTimeSelection = async (minutes: number) => {
+    const timeMessage = `${minutes} minutes`;
+    setShowTimeSlider(false);
+    
+    // Directly submit the message
+    if (loading) return;
+    
+    setLoading(true);
+    setMessages((prev) => [...prev, { role: 'user', content: timeMessage }]);
+    
+    try {
+      const conversationHistory = messages.map(m => ({
+        role: m.role === 'user' ? 'user' : 'assistant',
+        content: m.content
+      }));
+      
+      conversationHistory.push({ role: 'user', content: timeMessage });
+      
+      const openAiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content: `You are Grit, a focused coach conducting a 4-question interview to create a 30-day plan.
+
+RULES:
+- Keep responses to 1-2 sentences MAX
+- Ask ONE question at a time
+- Count user messages to know which question to ask
+
+QUESTION SEQUENCE (based on user message count):
+1st user message → Ask: "How much time can you dedicate daily?"
+2nd user message → Ask: "Any constraints or challenges?"
+3rd user message → Ask: "Experience level - beginner, intermediate, or advanced?"
+4th user message → Ask: "What time of day - morning, afternoon, or evening?"
+5th user message → Respond with ONLY this JSON (no other text):
+{
+  "complete": true,
+  "data": {
+    "monthly_goal": "user's exact goal from message 1",
+    "goal_category": "fitness|financial|creative|professional|health|personal",
+    "daily_time_minutes": 30,
+    "current_level": "beginner|intermediate|advanced",
+    "preferred_time": "morning|afternoon|evening"
+  }
+}
+
+Current conversation has ${conversationHistory.filter(m => m.role === 'user').length} user messages.`
+            },
+            ...conversationHistory
+          ],
+          temperature: 0.7,
+          max_tokens: 500
+        })
+      });
+      
+      const data = await openAiResponse.json();
+      const assistantMessage = data.choices?.[0]?.message?.content || 'Sorry, I had trouble understanding. Could you try again?';
+      
+      setMessages((prev) => [...prev, { role: 'assistant', content: assistantMessage }]);
+      
+      // Detect which interactive element to show next
+      if (assistantMessage.toLowerCase().includes('experience level') || (assistantMessage.toLowerCase().includes('beginner') && assistantMessage.toLowerCase().includes('advanced'))) {
+        setShowExperienceButtons(true);
       }
     } catch (error: any) {
       console.error('Chat error:', error);
@@ -745,6 +782,22 @@ Make it specific to their goal "${extractedData.monthly_goal}". Include 4 weeks,
     } finally {
       setLoading(false);
     }
+  };
+  
+  // Handler for experience level button
+  const handleExperienceSelection = async (level: string) => {
+    setShowExperienceButtons(false);
+    setInput(level);
+    // Trigger sendMessage after setting input
+    setTimeout(() => sendMessage(), 50);
+  };
+  
+  // Handler for time of day button
+  const handleTimeOfDaySelection = async (timeOfDay: string) => {
+    setShowTimeOfDayButtons(false);
+    setInput(timeOfDay);
+    // Trigger sendMessage after setting input
+    setTimeout(() => sendMessage(), 50);
   };
 
   // Old template-based generation removed - now using AI-powered generation above
@@ -762,13 +815,24 @@ Make it specific to their goal "${extractedData.monthly_goal}". Include 4 weeks,
         }}
         resizeMode="cover"
       />
+      <View style={styles.headerBar}>
+        <View style={styles.headerLeft}>
+          <Pressable onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          </Pressable>
+          <Image 
+            source={require('@/assets/images/logo.png')}
+            style={styles.headerLogo}
+          />
+        </View>
+        <Text style={styles.headerTitle}>ONBOARDING</Text>
+      </View>
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-      <ScrollView
-        ref={scrollRef}
+      <CustomScrollView
         style={styles.messagesContainer}
         contentContainerStyle={styles.messagesContent}
         onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
@@ -801,15 +865,151 @@ Make it specific to their goal "${extractedData.monthly_goal}". Include 4 weeks,
         ))}
         {loading && (
           <View style={[styles.messageBubble, styles.assistantBubble]}>
-            <View style={styles.coachAvatar}>
-              <Text style={styles.coachAvatarText}>🎯</Text>
-            </View>
+            <Image 
+              source={require('@/assets/images/gockins.png')}
+              style={styles.coachAvatar}
+            />
             <View style={styles.messageContent}>
               <ActivityIndicator color="#C64F1A" />
             </View>
           </View>
         )}
-      </ScrollView>
+        
+        {/* Commitment Buttons */}
+        {showCommitmentButtons && !loading && (
+          <View style={styles.interactiveContainer}>
+            <View style={styles.buttonGroup}>
+              <Pressable 
+                style={styles.commitmentButton}
+                onPress={() => handleCommitmentSelection("I'm in")}
+              >
+                <Text style={styles.commitmentButtonText}>I'M IN</Text>
+              </Pressable>
+              <Pressable 
+                style={styles.commitmentButton}
+                onPress={() => handleCommitmentSelection('Push me')}
+              >
+                <Text style={styles.commitmentButtonText}>PUSH ME</Text>
+              </Pressable>
+              <Pressable 
+                style={styles.commitmentButton}
+                onPress={() => handleCommitmentSelection("Let's go")}
+              >
+                <Text style={styles.commitmentButtonText}>LET'S GO</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+        
+        {/* Time Slider */}
+        {showTimeSlider && !loading && (
+          <View style={styles.interactiveContainer}>
+            <Text style={styles.sliderLabel}>{timeSliderValue} minutes per day</Text>
+            <Slider
+              style={styles.slider}
+              minimumValue={10}
+              maximumValue={120}
+              step={5}
+              value={timeSliderValue}
+              onValueChange={setTimeSliderValue}
+              minimumTrackTintColor="#FF0000"
+              maximumTrackTintColor="#333333"
+              thumbTintColor="#FF0000"
+            />
+            <Pressable 
+              style={styles.submitButton}
+              onPress={() => handleTimeSelection(timeSliderValue)}
+            >
+              <Text style={styles.submitButtonText}>CONFIRM</Text>
+            </Pressable>
+          </View>
+        )}
+        
+        {/* Experience Level Buttons */}
+        {showExperienceButtons && !loading && (
+          <View style={styles.interactiveContainer}>
+            <Text style={styles.buttonGroupLabel}>Select your experience level:</Text>
+            <View style={styles.buttonGroup}>
+              <Pressable 
+                style={styles.experienceButton}
+                onPress={() => handleExperienceSelection('Beginner')}
+              >
+                <Text style={styles.experienceButtonText}>BEGINNER</Text>
+              </Pressable>
+              <Pressable 
+                style={styles.experienceButton}
+                onPress={() => handleExperienceSelection('Intermediate')}
+              >
+                <Text style={styles.experienceButtonText}>INTERMEDIATE</Text>
+              </Pressable>
+              <Pressable 
+                style={styles.experienceButton}
+                onPress={() => handleExperienceSelection('Advanced')}
+              >
+                <Text style={styles.experienceButtonText}>ADVANCED</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+        
+        {/* Time of Day Buttons */}
+        {showTimeOfDayButtons && !loading && !showCoachSelection && (
+          <View style={styles.interactiveContainer}>
+            <Text style={styles.buttonGroupLabel}>When works best for you?</Text>
+            <View style={styles.buttonGroup}>
+              <Pressable 
+                style={styles.timeOfDayButton}
+                onPress={() => handleTimeOfDaySelection('Morning')}
+              >
+                <Text style={styles.timeOfDayButtonText}>MORNING</Text>
+              </Pressable>
+              <Pressable 
+                style={styles.timeOfDayButton}
+                onPress={() => handleTimeOfDaySelection('Afternoon')}
+              >
+                <Text style={styles.timeOfDayButtonText}>AFTERNOON</Text>
+              </Pressable>
+              <Pressable 
+                style={styles.timeOfDayButton}
+                onPress={() => handleTimeOfDaySelection('Evening')}
+              >
+                <Text style={styles.timeOfDayButtonText}>EVENING</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
+        {/* Coach Selection */}
+        {showCoachSelection && coachProfiles.length > 0 && (
+          <View style={styles.coachSelectionContainer}>
+            <Text style={styles.coachSelectionTitle}>6. Choose Your Coach</Text>
+            <Text style={styles.coachSelectionSubtitle}>Pick the coaching style that's going to push you.</Text>
+            <View style={styles.coachCardsList}>
+              {coachProfiles.map((coach) => (
+                <CoachCard
+                  key={coach.slug}
+                  coach={coach}
+                  selected={coach.slug === selectedCoachSlug}
+                  onPress={() => setSelectedCoachSlug(coach.slug)}
+                />
+              ))}
+            </View>
+            <Pressable
+              onPress={handleCoachConfirm}
+              disabled={!selectedCoachSlug || savingCoach}
+              style={({ pressed }) => [
+                styles.coachConfirmButton,
+                (pressed && !savingCoach && selectedCoachSlug) && styles.coachConfirmButtonPressed,
+                (!selectedCoachSlug || savingCoach) && styles.coachConfirmButtonDisabled,
+              ]}
+            >
+              <Text style={styles.coachConfirmButtonText}>
+                {savingCoach ? 'SAVING...' : 'LOCK IN THIS COACH'}
+              </Text>
+            </Pressable>
+          </View>
+        )}
+      </CustomScrollView>
 
       <View style={styles.inputContainer}>
         <TextInput
@@ -844,23 +1044,40 @@ Make it specific to their goal "${extractedData.monthly_goal}". Include 4 weeks,
 const styles = StyleSheet.create({
   backgroundImage: {
     flex: 1,
+    backgroundColor: '#000000',
   },
   container: {
     flex: 1,
     backgroundColor: 'transparent',
   },
-  header: {
-    paddingTop: 60,
-    paddingHorizontal: 24,
-    paddingBottom: 16,
+  headerBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#000000',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#2A2A2A',
+    borderBottomColor: '#FF0000',
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  backButton: {
+    padding: 4,
+  },
+  headerLogo: {
+    width: 100,
+    height: 32,
+    resizeMode: 'contain',
   },
   headerTitle: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '800',
-    marginBottom: 4,
+    color: '#EEEEEE',
+    fontSize: 14,
+    fontFamily: 'Akira-Extended',
+    letterSpacing: 2,
   },
   headerSubtitle: {
     color: '#9CA3AF',
@@ -954,5 +1171,136 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 24,
     fontWeight: '600',
+  },
+  interactiveContainer: {
+    backgroundColor: 'rgba(45, 60, 80, 0.9)',
+    borderRadius: 16,
+    padding: 20,
+    marginHorizontal: 16,
+    marginVertical: 12,
+    borderWidth: 2,
+    borderColor: '#FF0000',
+  },
+  sliderLabel: {
+    color: '#EEEEEE',
+    fontSize: 18,
+    fontFamily: 'Akira-Extended',
+    textAlign: 'center',
+    marginBottom: 16,
+    letterSpacing: 1,
+  },
+  slider: {
+    width: '100%',
+    height: 40,
+    marginBottom: 20,
+  },
+  submitButton: {
+    backgroundColor: '#FF0000',
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  submitButtonText: {
+    color: '#000000',
+    fontSize: 14,
+    fontFamily: 'Akira-Extended',
+    letterSpacing: 1,
+  },
+  buttonGroupLabel: {
+    color: '#CCCCCC',
+    fontSize: 14,
+    fontFamily: 'OpenSans-Regular',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  buttonGroup: {
+    gap: 12,
+  },
+  commitmentButton: {
+    backgroundColor: '#FF0000',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginBottom: 8,
+    borderWidth: 2,
+    borderColor: '#FF0000',
+  },
+  commitmentButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Akira-Extended',
+    letterSpacing: 1.5,
+  },
+  experienceButton: {
+    backgroundColor: '#233551',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  experienceButtonText: {
+    color: '#EEEEEE',
+    fontSize: 14,
+    fontFamily: 'Akira-Extended',
+    letterSpacing: 1,
+  },
+  timeOfDayButton: {
+    backgroundColor: '#FF6B35',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  timeOfDayButtonText: {
+    color: '#000000',
+    fontSize: 14,
+    fontFamily: 'Akira-Extended',
+    letterSpacing: 1,
+  },
+  coachSelectionContainer: {
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    borderRadius: 16,
+    padding: 20,
+    marginHorizontal: 16,
+    marginVertical: 16,
+    borderWidth: 1,
+    borderColor: '#FF0000',
+  },
+  coachSelectionTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontFamily: 'Akira-Extended',
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  coachSelectionSubtitle: {
+    color: '#CCCCCC',
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  coachCardsList: {
+    marginBottom: 16,
+  },
+  coachConfirmButton: {
+    backgroundColor: '#FF0000',
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  coachConfirmButtonPressed: {
+    opacity: 0.85,
+  },
+  coachConfirmButtonDisabled: {
+    opacity: 0.5,
+  },
+  coachConfirmButtonText: {
+    color: '#000000',
+    fontSize: 14,
+    fontFamily: 'Akira-Extended',
+    letterSpacing: 1,
   },
 });

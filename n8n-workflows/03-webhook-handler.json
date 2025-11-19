@@ -1,0 +1,314 @@
+{
+  "name": "Grit - Vapi Webhook Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vapi-webhook",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Vapi Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "vapi-webhook-handler"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "webhook_events",
+        "columns": "event_type,source,vapi_call_id,payload,headers",
+        "additionalFields": {
+          "event_type": "={{ $json.body.event }}",
+          "source": "vapi",
+          "vapi_call_id": "={{ $json.body.call.id }}",
+          "payload": "={{ JSON.stringify($json.body) }}",
+          "headers": "={{ JSON.stringify($json.headers) }}"
+        },
+        "options": {}
+      },
+      "id": "log-webhook",
+      "name": "Log Webhook Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [450, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-credentials",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "event-type",
+              "leftValue": "={{ $json.body.event }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "singleValue": "call.started"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "route-by-event",
+      "name": "Route by Event Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE scheduled_calls SET status = 'calling', call_started_at = NOW(), updated_at = NOW() WHERE vapi_call_id = '{{ $json.body.call.id }}'",
+        "options": {}
+      },
+      "id": "handle-call-started",
+      "name": "Handle Call Started",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [850, 100],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-credentials",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract call data from Vapi webhook\nconst webhook = $input.first().json.body;\nconst call = webhook.call;\n\n// Extract function call data if present\nlet commitment = null;\nlet confidence = null;\nlet completedToday = null;\n\nif (call.messages) {\n  for (const msg of call.messages) {\n    if (msg.role === 'function_call' && msg.function_call?.name === 'record_commitment') {\n      const args = JSON.parse(msg.function_call.arguments || '{}');\n      commitment = args.commitment;\n      confidence = args.confidence;\n      completedToday = args.completed_today;\n    }\n  }\n}\n\nreturn [{\n  json: {\n    vapi_call_id: call.id,\n    status: call.status === 'ended' ? 'completed' : 'failed',\n    end_reason: call.endedReason,\n    duration_seconds: call.duration,\n    transcript: call.transcript ? JSON.stringify(call.transcript) : null,\n    summary: call.summary,\n    user_commitment: commitment,\n    user_confidence: confidence,\n    user_completed_today: completedToday,\n    cost_cents: Math.round((call.cost || 0) * 100),\n    ended_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse-call-ended",
+      "name": "Parse Call Ended Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE scheduled_calls SET status = '{{ $json.status }}', call_ended_at = '{{ $json.ended_at }}', call_duration_seconds = {{ $json.duration_seconds }}, transcript = '{{ $json.transcript }}'::jsonb, summary = '{{ $json.summary }}'::jsonb, user_commitment = '{{ $json.user_commitment }}', user_confidence = {{ $json.user_confidence }}, user_completed_today = {{ $json.user_completed_today }}, updated_at = NOW() WHERE vapi_call_id = '{{ $json.vapi_call_id }}'",
+        "options": {}
+      },
+      "id": "update-call-completed",
+      "name": "Update Call Completed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1050, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-credentials",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE call_logs SET status = '{{ $('Parse Call Ended Data').item.json.status }}', ended_at = '{{ $('Parse Call Ended Data').item.json.ended_at }}', duration_seconds = {{ $('Parse Call Ended Data').item.json.duration_seconds }}, full_transcript = '{{ $('Parse Call Ended Data').item.json.transcript }}'::jsonb, summary = '{{ $('Parse Call Ended Data').item.json.summary }}', user_commitment = '{{ $('Parse Call Ended Data').item.json.user_commitment }}', user_confidence = {{ $('Parse Call Ended Data').item.json.user_confidence }}, completed_today = {{ $('Parse Call Ended Data').item.json.user_completed_today }}, cost_cents = {{ $('Parse Call Ended Data').item.json.cost_cents }}, end_reason = '{{ $('Parse Call Ended Data').item.json.end_reason }}' WHERE vapi_call_id = '{{ $('Parse Call Ended Data').item.json.vapi_call_id }}'",
+        "options": {}
+      },
+      "id": "update-call-log",
+      "name": "Update Call Log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1250, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-credentials",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse failed call data\nconst webhook = $input.first().json.body;\nconst call = webhook.call;\n\nreturn [{\n  json: {\n    vapi_call_id: call.id,\n    error_message: call.endedReason || 'Call failed',\n    status: 'failed'\n  }\n}];"
+      },
+      "id": "parse-call-failed",
+      "name": "Parse Call Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 500]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE scheduled_calls SET status = 'failed', error_message = '{{ $json.error_message }}', attempt_number = attempt_number + 1, retry_after = CASE WHEN attempt_number < max_attempts THEN NOW() + INTERVAL '1 hour' ELSE NULL END, updated_at = NOW() WHERE vapi_call_id = '{{ $json.vapi_call_id }}'",
+        "options": {}
+      },
+      "id": "handle-call-failed",
+      "name": "Handle Call Failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1050, 500],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-credentials",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"message\": \"Webhook processed\" }",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Respond to Vapi",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "content": "## Webhook Handler\n\nReceives webhooks from Vapi:\n- call.started\n- call.ended\n- call.failed\n- function-call\n\nUpdates database accordingly and triggers post-processing.",
+        "height": 400,
+        "width": 300
+      },
+      "id": "note-3",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 460]
+    }
+  ],
+  "connections": {
+    "Vapi Webhook": {
+      "main": [
+        [
+          {
+            "node": "Log Webhook Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Webhook Event": {
+      "main": [
+        [
+          {
+            "node": "Route by Event Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Event Type": {
+      "main": [
+        [
+          {
+            "node": "Handle Call Started",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Call Ended Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Call Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Call Ended Data": {
+      "main": [
+        [
+          {
+            "node": "Update Call Completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Call Completed": {
+      "main": [
+        [
+          {
+            "node": "Update Call Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Call Log": {
+      "main": [
+        [
+          {
+            "node": "Respond to Vapi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Call Failed": {
+      "main": [
+        [
+          {
+            "node": "Handle Call Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Call Failed": {
+      "main": [
+        [
+          {
+            "node": "Respond to Vapi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Call Started": {
+      "main": [
+        [
+          {
+            "node": "Respond to Vapi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-11-17T00:00:00.000Z",
+  "versionId": "1"
+}

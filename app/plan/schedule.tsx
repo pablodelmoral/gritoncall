@@ -1,14 +1,56 @@
 // Plan start date scheduler
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert } from 'react-native';
-import { useRouter } from 'expo-router';
-import { supabase } from '@/lib/supabase';
 import AppHeader from '@/components/AppHeader';
+import Button from '@/components/atoms/Button';
+import CustomScrollView from '@/components/atoms/CustomScrollView';
+import GradientCard from '@/components/atoms/GradientPanel';
+import { supabase } from '@/lib/supabase';
+import { useRouter } from 'expo-router';
+import React, { useState } from 'react';
+import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function SchedulePlan() {
   const router = useRouter();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [saving, setSaving] = useState(false);
+  const [preferredTime, setPreferredTime] = useState<string>('morning');
+  const [timeValidationError, setTimeValidationError] = useState<string>('');
+
+  // Load user's preferred time from plan
+  React.useEffect(() => {
+    const loadPreferredTime = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data: userPublic } = await supabase
+          .from('users_public')
+          .select('id')
+          .eq('auth_id', user.id)
+          .single();
+
+        if (!userPublic) return;
+
+        const { data: plan } = await supabase
+          .from('plans')
+          .select('preferred_time')
+          .eq('user_id', userPublic.id)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (plan?.preferred_time) {
+          setPreferredTime(plan.preferred_time);
+          // Validate initial date selection
+          validateTimeSelection(selectedDate);
+        }
+      } catch (error) {
+        console.error('Error loading preferred time:', error);
+      }
+    };
+
+    loadPreferredTime();
+  }, []);
 
   const formatDate = (date: Date) => {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -20,6 +62,38 @@ export default function SchedulePlan() {
     const newDate = new Date(selectedDate);
     newDate.setDate(newDate.getDate() + days);
     setSelectedDate(newDate);
+    validateTimeSelection(newDate);
+  };
+
+  // Check if the selected time has already passed for today
+  const validateTimeSelection = (date: Date) => {
+    const isToday = date.toDateString() === new Date().toDateString();
+    if (!isToday) {
+      setTimeValidationError('');
+      return true;
+    }
+
+    const now = new Date();
+    const currentHour = now.getHours();
+
+    // Define time windows
+    const timeWindows = {
+      morning: { end: 12, label: 'Morning' },      // Before noon
+      afternoon: { end: 17, label: 'Afternoon' },  // Before 5 PM
+      evening: { end: 24, label: 'Evening' }       // Before midnight
+    };
+
+    const selectedWindow = timeWindows[preferredTime as keyof typeof timeWindows];
+    
+    if (selectedWindow && currentHour >= selectedWindow.end) {
+      setTimeValidationError(
+        `⚠️ ${selectedWindow.label} has already passed today. Please choose tomorrow or select a different date.`
+      );
+      return false;
+    }
+
+    setTimeValidationError('');
+    return true;
   };
 
   const confirmAndSave = async () => {
@@ -53,6 +127,12 @@ export default function SchedulePlan() {
       }
 
       console.log('📦 Plan loaded from database:', existingPlan);
+
+      // Validate time selection before saving
+      if (!validateTimeSelection(selectedDate)) {
+        setSaving(false);
+        return;
+      }
 
       // Update the plan's start date
       const { error: updateError } = await supabase
@@ -88,16 +168,8 @@ export default function SchedulePlan() {
 
       console.log('✅ Plan scheduled successfully!');
 
-      Alert.alert(
-        'Plan Scheduled!',
-        `Your 30-day journey starts on ${formatDate(selectedDate)}. Your first accountability call is scheduled for that morning.`,
-        [
-          {
-            text: 'Let\'s Go!',
-            onPress: () => router.replace('/(tabs)' as any),
-          },
-        ]
-      );
+      // Navigate directly to home page
+      router.replace('/(tabs)' as any);
     } catch (error: any) {
       console.error('❌ Error saving plan:', error);
       console.error('Error details:', JSON.stringify(error, null, 2));
@@ -124,30 +196,60 @@ export default function SchedulePlan() {
 
   return (
     <View style={styles.wrapper}>
-      <View style={styles.container}>
-      <Text style={styles.title}>SCHEDULE YOUR PLAN</Text>
+      <Image
+        source={require('@/assets/images/bg.png')}
+        style={{
+          position: 'absolute',
+          width: '100%',
+          height: '100%',
+          top: 0,
+          left: 0,
+        }}
+        resizeMode="cover"
+      />
+      {/* Header Bar */}
+      <View style={styles.headerBar}>
+        <Image
+          source={require('@/assets/images/logo.png')}
+          style={styles.headerLogo}
+        />
+        <Text style={styles.pageTitle}>SCHEDULE YOUR PLAN</Text>
+      </View>
+      <CustomScrollView style={styles.container}>
       <Text style={styles.subtitle}>When do you want to start your 30-day journey?</Text>
 
-      <View style={styles.dateSelector}>
-        <Pressable onPress={() => adjustDate(-1)} style={styles.arrowButton}>
-          <Text style={styles.arrowText}>←</Text>
-        </Pressable>
+      <GradientCard style={styles.dateSelector} padding={20}>
+        <View style={styles.dateSelectorRow}>
+          <Pressable onPress={() => adjustDate(-1)} style={styles.arrowButton}>
+            <Text style={styles.arrowText}>←</Text>
+          </Pressable>
 
-        <View style={styles.dateDisplay}>
-          <Text style={styles.dateText}>{formatDate(selectedDate)}</Text>
-          {selectedDate.toDateString() === new Date().toDateString() && (
-            <Text style={styles.todayBadge}>TODAY</Text>
-          )}
+          <View style={styles.dateDisplay}>
+            <Text style={styles.dateText}>{formatDate(selectedDate)}</Text>
+            {selectedDate.toDateString() === new Date().toDateString() && (
+              <Text style={styles.todayBadge}>TODAY</Text>
+            )}
+          </View>
+
+          <Pressable onPress={() => adjustDate(1)} style={styles.arrowButton}>
+            <Text style={styles.arrowText}>→</Text>
+          </Pressable>
         </View>
+      </GradientCard>
 
-        <Pressable onPress={() => adjustDate(1)} style={styles.arrowButton}>
-          <Text style={styles.arrowText}>→</Text>
-        </Pressable>
-      </View>
+      {timeValidationError ? (
+        <GradientCard style={styles.warningBox}>
+          <Text style={styles.warningText}>{timeValidationError}</Text>
+        </GradientCard>
+      ) : null}
 
       <View style={styles.quickOptions}>
         <Pressable
-          onPress={() => setSelectedDate(new Date())}
+          onPress={() => {
+            const today = new Date();
+            setSelectedDate(today);
+            validateTimeSelection(today);
+          }}
           style={styles.quickButton}
         >
           <Text style={styles.quickButtonText}>Today</Text>
@@ -158,6 +260,7 @@ export default function SchedulePlan() {
             const tomorrow = new Date();
             tomorrow.setDate(tomorrow.getDate() + 1);
             setSelectedDate(tomorrow);
+            validateTimeSelection(tomorrow);
           }}
           style={styles.quickButton}
         >
@@ -170,6 +273,7 @@ export default function SchedulePlan() {
             const daysUntilMonday = (8 - nextMonday.getDay()) % 7 || 7;
             nextMonday.setDate(nextMonday.getDate() + daysUntilMonday);
             setSelectedDate(nextMonday);
+            validateTimeSelection(nextMonday);
           }}
           style={styles.quickButton}
         >
@@ -177,28 +281,27 @@ export default function SchedulePlan() {
         </Pressable>
       </View>
 
-      <View style={styles.infoBox}>
+      <GradientCard style={styles.infoBox}>
         <Text style={styles.infoTitle}>What happens next:</Text>
-        <Text style={styles.infoText}>• Your first call will be scheduled for {formatDate(selectedDate)} morning</Text>
+        <Text style={styles.infoText}>• Your first call will be scheduled for {formatDate(selectedDate)} in the {preferredTime}</Text>
         <Text style={styles.infoText}>• You'll receive daily accountability calls at your preferred time</Text>
         <Text style={styles.infoText}>• Track your progress and maintain your streak</Text>
         <Text style={styles.infoText}>• Complete all 30 days to achieve your goal</Text>
-      </View>
+      </GradientCard>
 
-      <Pressable
-        onPress={confirmAndSave}
-        disabled={saving}
-        style={[styles.confirmButton, saving && styles.confirmButtonDisabled]}
-      >
-        <Text style={styles.confirmButtonText}>
-          {saving ? 'SAVING...' : 'CONFIRM & START'}
-        </Text>
-      </Pressable>
+      <View style={styles.buttonContainer}>
+        <Button
+          title={saving ? 'SAVING...' : 'CONFIRM & START'}
+          onPress={confirmAndSave}
+          disabled={saving || !!timeValidationError}
+          variant="primary"
+        />
+      </View>
 
       <Pressable onPress={() => router.back()} style={styles.backButton}>
         <Text style={styles.backButtonText}>Go Back</Text>
       </Pressable>
-      </View>
+      </CustomScrollView>
       <AppHeader />
     </View>
   );
@@ -209,18 +312,29 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0A0A0A',
   },
+  headerBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#000000',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+  },
+  headerLogo: {
+    width: 80,
+    height: 28,
+    resizeMode: 'contain',
+  },
+  pageTitle: {
+    color: '#CCCCCC',
+    fontSize: 15,
+    fontFamily: 'Akira-Extended',
+    letterSpacing: 1.5,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#0A0A0A',
+    backgroundColor: 'transparent',
     padding: 20,
-  },
-  title: {
-    color: '#FF0000',
-    fontSize: 24,
-    fontWeight: '900',
-    letterSpacing: 2,
-    marginTop: 40,
-    marginBottom: 8,
   },
   subtitle: {
     color: '#888',
@@ -228,16 +342,16 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   dateSelector: {
+    marginBottom: 24,
+  },
+  dateSelectorRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 24,
   },
   arrowButton: {
     width: 50,
     height: 50,
-    backgroundColor: '#1A1A1A',
-    borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -249,13 +363,10 @@ const styles = StyleSheet.create({
   dateDisplay: {
     flex: 1,
     marginHorizontal: 16,
-    backgroundColor: '#1A1A1A',
-    padding: 20,
-    borderRadius: 12,
     alignItems: 'center',
   },
   dateText: {
-    color: '#FFF',
+    color: '#EEEEEE',
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
@@ -263,7 +374,7 @@ const styles = StyleSheet.create({
   todayBadge: {
     color: '#FF0000',
     fontSize: 12,
-    fontWeight: '900',
+    fontFamily: 'Akira-Extended',
     marginTop: 8,
     letterSpacing: 1,
   },
@@ -280,43 +391,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   quickButtonText: {
-    color: '#FFF',
+    color: '#EEEEEE',
     fontSize: 14,
     fontWeight: '600',
   },
   infoBox: {
-    backgroundColor: '#1A1A1A',
-    padding: 20,
-    borderRadius: 12,
     marginBottom: 32,
   },
   infoTitle: {
     color: '#FF0000',
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: 'Akira-Extended',
     marginBottom: 12,
+    letterSpacing: 1,
   },
   infoText: {
-    color: '#AAA',
+    color: '#CCCCCC',
     fontSize: 14,
     marginBottom: 8,
     lineHeight: 20,
   },
-  confirmButton: {
-    backgroundColor: '#FF0000',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
+  buttonContainer: {
     marginBottom: 12,
-  },
-  confirmButtonDisabled: {
-    opacity: 0.5,
-  },
-  confirmButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '900',
-    letterSpacing: 1,
   },
   backButton: {
     paddingVertical: 16,
@@ -326,5 +422,17 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 14,
     fontWeight: '600',
+  },
+  warningBox: {
+    marginBottom: 24,
+    backgroundColor: 'rgba(255, 0, 0, 0.1)',
+    borderWidth: 1,
+    borderColor: '#FF0000',
+  },
+  warningText: {
+    color: '#FF0000',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
   },
 });

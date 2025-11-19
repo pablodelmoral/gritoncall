@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, Image, useWindowDimensions, Text, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import AppHeader from '@/components/AppHeader';
 import { useQuery } from '@tanstack/react-query';
@@ -8,8 +8,10 @@ import { Colors } from '@/constants/colors';
 import Typography from '@/components/atoms/Typography';
 import Button from '@/components/atoms/Button';
 import Card from '@/components/molecules/Card';
+import CustomScrollView from '@/components/atoms/CustomScrollView';
 
 export default function PlanOverview() {
+  const { width, height } = useWindowDimensions();
   const router = useRouter();
   const [planData, setPlanData] = React.useState<any>({
     monthlyGoal: '',
@@ -145,6 +147,24 @@ export default function PlanOverview() {
   if (loading) {
     return (
       <View style={styles.wrapper}>
+        <Image
+          source={require('@/assets/images/bg.png')}
+          style={{
+            position: 'absolute',
+            width: '100%',
+            height: '100%',
+            top: 0,
+            left: 0,
+          }}
+          resizeMode="cover"
+        />
+        <View style={styles.headerBar}>
+          <Image 
+            source={require('@/assets/images/logo.png')}
+            style={styles.headerLogo}
+          />
+          <Text style={styles.headerTitle}>YOUR PLAN</Text>
+        </View>
         <View style={styles.loadingContainer}>
           <Typography variant="h3">Loading your plan...</Typography>
         </View>
@@ -156,7 +176,25 @@ export default function PlanOverview() {
   if (!planData || !planData.monthlyGoal) {
     return (
       <View style={styles.wrapper}>
-        <ScrollView style={styles.container}>
+        <Image
+          source={require('@/assets/images/bg.png')}
+          style={{
+            position: 'absolute',
+            width: '100%',
+            height: '100%',
+            top: 0,
+            left: 0,
+          }}
+          resizeMode="cover"
+        />
+        <View style={styles.headerBar}>
+          <Image 
+            source={require('@/assets/images/logo.png')}
+            style={styles.headerLogo}
+          />
+          <Text style={styles.headerTitle}>YOUR PLAN</Text>
+        </View>
+        <CustomScrollView style={styles.container}>
           <View style={styles.header}>
             <Typography variant="h2">NO PLAN YET</Typography>
           </View>
@@ -172,7 +210,7 @@ export default function PlanOverview() {
               variant="primary"
             />
           </View>
-        </ScrollView>
+        </CustomScrollView>
         <AppHeader />
       </View>
     );
@@ -180,11 +218,25 @@ export default function PlanOverview() {
 
   return (
     <View style={styles.wrapper}>
-      <ScrollView style={styles.container}>
-        <View style={styles.header}>
-          <Typography variant="h2">YOUR 30 DAY PLAN</Typography>
-        </View>
-
+      <Image
+        source={require('@/assets/images/bg.png')}
+        style={{
+          position: 'absolute',
+          width: '100%',
+          height: '100%',
+          top: 0,
+          left: 0,
+        }}
+        resizeMode="cover"
+      />
+      <View style={styles.headerBar}>
+        <Image 
+          source={require('@/assets/images/logo.png')}
+          style={styles.headerLogo}
+        />
+        <Text style={styles.headerTitle}>YOUR PLAN</Text>
+      </View>
+      <CustomScrollView style={styles.container}>
         <Card title="Monthly Goal" style={styles.section}>
           <Typography variant="body">{planData.monthlyGoal || 'Loading...'}</Typography>
         </Card>
@@ -219,7 +271,7 @@ export default function PlanOverview() {
             variant="secondary"
           />
         </View>
-      </ScrollView>
+      </CustomScrollView>
       <AppHeader />
     </View>
   );
@@ -232,13 +284,35 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: Colors.black,
+    backgroundColor: 'transparent', // Transparent to show background image
     padding: 24,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  headerBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#000000',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FF0000',
+  },
+  headerLogo: {
+    width: 100,
+    height: 32,
+    resizeMode: 'contain',
+  },
+  headerTitle: {
+    color: '#CCCCCC',
+    fontSize: 15,
+    fontFamily: 'Akira-Extended',
+    letterSpacing: 1.5,
   },
   header: {
     paddingTop: 40,
@@ -247,6 +321,7 @@ const styles = StyleSheet.create({
   },
   section: {
     marginHorizontal: 0,
+    marginBottom: 16,
   },
   weekText: {
     marginBottom: 8,
